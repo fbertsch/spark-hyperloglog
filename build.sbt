@@ -1,6 +1,6 @@
 name := "spark-hyperloglog"
 
-version := "1.1.1"
+version := "1.2.0"
 
 scalaVersion := "2.11.8"
 
@@ -8,7 +8,7 @@ spName := "vitillo/spark-hyperloglog"
 
 spIncludeMaven := false
 
-sparkVersion := "2.0.0"
+sparkVersion := "2.1.1"
 
 sparkComponents ++= Seq("core", "sql")
 
