@@ -80,3 +80,73 @@ class HyperLogLogMerge extends UserDefinedAggregateFunction {
     com.twitter.algebird.HyperLogLog.toBytes(state)
   }
 }
+
+/**
+ * This class adds the capability to take in
+ * another Boolean column and only adds the
+ * associated hll if the Boolean column is `True`.
+ *
+ * Having this function makes it easy to answer
+ * questions about % of the population. For example,
+ * if we had the table `clients`:
+ *
+ * | client_id | submission_date | version | os      |
+ * |:=========:|:===============:|:=======:|:=======:|
+ * | a         | 2017-07-01      | 42      | Windows |
+ * | b         | 2017-07-01      | 43      | MacOS   |
+ *
+ * And we wanted to answer the question:
+ * "What % of the population is on Windows on each version?"
+ * Without this function, we would add os
+ * as a dimension, so we would end up with
+ * the table `os_counts`:
+ *
+ * | os      | version | hll     |
+ * |:=======:|:=======:|:=======:|
+ * | Windows | 42      | 0x1b3c3 |
+ * | MacOS   | 43      | 0xb2222 |
+ *
+ * And to retrieve the %, we would need to
+ * run the following fairly convoluted query:
+ * '''sql
+ * WITH total_counts AS (
+ *   SELECT version,
+ *     cardinality(merge(cast(hll AS HLL))) as total_count
+ *   FROM os_counts
+ *   GROUP BY version
+ * )
+ *
+ * SELECT version,
+ *   cadinality(cast(hll AS HLL)) / cast(total_count AS FLOAT)
+ * FROM os_counts
+ * INNER JOIN total_counts ON os_counts.version = total_counts.version
+ * WHERE os = "Windows"
+ * ```
+ *
+ * With filtered HLLs, we can simply create two HLL columns
+ * in the table `os_counts`:
+ *
+ * | version | all_clients | windows_clients |
+ * |:=======:|:===========:|:===============:|
+ * | 42      | 0x1b3c3     | 0x002b          |
+ * | 43      | 0xb2222     | 0x0c88          |
+ *
+ * And the query is simply:
+ * ```sql
+ * SELECT version,
+ *   cardinality(cast(windows_clients AS HLL)) /
+ *     cardinality(cast(all_clients AS HLL))
+ * FROM os_counts
+ * ```
+ */
+class FilteredHyperLogLogMerge extends HyperLogLogMerge {
+
+  override def inputSchema: org.apache.spark.sql.types.StructType =
+    StructType(StructField("value", BinaryType) :: StructField("filtered", BooleanType) :: Nil)
+
+  override def update(buffer: MutableAggregationBuffer, input: Row): Unit = {
+    if (input(1) != null && input.getAs[Boolean](1)) {
+      super.update(buffer, input)
+    }
+  }
+}
